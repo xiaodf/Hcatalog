@@ -1,0 +1,81 @@
+package iie.hadoop.hcatalog;
+
+import java.io.IOException;
+import java.util.StringTokenizer;
+
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.io.IntWritable;
+import org.apache.hadoop.io.Text;
+import org.apache.hadoop.mapreduce.Job;
+import org.apache.hadoop.mapreduce.Mapper;
+import org.apache.hadoop.mapreduce.Reducer;
+import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
+import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
+import org.apache.hadoop.util.GenericOptionsParser;
+
+public class WordCount {
+
+	public static class TokenizerMapper extends
+			Mapper<Object, Text, Text, IntWritable> {
+
+		private final static IntWritable one = new IntWritable(1);
+		private Text word = new Text();// Text 实现了BinaryComparable类可以作为key值
+
+		public void map(Object key, Text value, Context context)
+				throws IOException, InterruptedException {
+
+			StringTokenizer itr = new StringTokenizer(value.toString());// 得到什么值
+			System.out.println("value什么东西 ： " + value.toString());
+			System.out.println("key什么东西 ： " + key.toString());
+
+			while (itr.hasMoreTokens()) {
+				word.set(itr.nextToken());
+				context.write(word, one);
+			}
+		}
+	}
+
+	public static class IntSumReducer extends
+			Reducer<Text, IntWritable, Text, IntWritable> {
+		private IntWritable result = new IntWritable();
+
+		public void reduce(Text key, Iterable<IntWritable> values,
+				Context context) throws IOException, InterruptedException {
+			int sum = 0;
+			for (IntWritable val : values) {
+				sum += val.get();
+			}
+			result.set(sum);
+			context.write(key, result);
+		}
+	}
+
+	public static void main(String[] args) throws Exception {
+
+		Configuration conf = new Configuration();
+		String[] otherArgs = new GenericOptionsParser(conf, args)
+				.getRemainingArgs();
+		// 这里需要配置参数即输入和输出的HDFS的文件路径
+		if (otherArgs.length != 2) {
+			System.err.println("Usage: wordcount <in> <out>");
+			System.exit(2);
+		}
+		// JobConf conf1 = new JobConf(WordCount.class);
+		@SuppressWarnings("deprecation")
+		Job job = new Job(conf, "word count");// Job(Configuration conf, String
+												// jobName) 设置job名称和
+		job.setJarByClass(WordCount.class);
+		job.setMapperClass(TokenizerMapper.class); // 为job设置Mapper类
+		job.setCombinerClass(IntSumReducer.class); // 为job设置Combiner类
+		job.setReducerClass(IntSumReducer.class); // 为job设置Reduce类
+		job.setOutputKeyClass(Text.class); // 设置输出key的类型
+		job.setOutputValueClass(IntWritable.class);// 设置输出value的类型
+		FileInputFormat.addInputPath(job, new Path(otherArgs[0])); // 为map-reduce任务设置InputFormat实现类
+																	// 设置输入路径
+
+		FileOutputFormat.setOutputPath(job, new Path(otherArgs[1]));// 为map-reduce任务设置OutputFormat实现类
+																	// 设置输出路径
+		System.exit(job.waitForCompletion(true) ? 0 : 1);
+	}
+}

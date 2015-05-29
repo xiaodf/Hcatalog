@@ -1,0 +1,153 @@
+package iie.hadoop.hcatalog;
+
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.Iterator;
+import java.util.Properties;
+
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.conf.Configured;
+import org.apache.hadoop.io.IntWritable;
+import org.apache.hadoop.io.WritableComparable;
+import org.apache.hadoop.mapreduce.Job;
+import org.apache.hadoop.mapreduce.Mapper;
+import org.apache.hadoop.mapreduce.Reducer;
+import org.apache.hadoop.util.GenericOptionsParser;
+import org.apache.hadoop.util.Tool;
+import org.apache.hadoop.util.ToolRunner;
+import org.apache.hive.hcatalog.common.HCatConstants;
+import org.apache.hive.hcatalog.common.HCatUtil;
+import org.apache.hive.hcatalog.data.DefaultHCatRecord;
+import org.apache.hive.hcatalog.data.HCatRecord;
+import org.apache.hive.hcatalog.data.schema.HCatSchema;
+import org.apache.hive.hcatalog.mapreduce.HCatInputFormat;
+import org.apache.hive.hcatalog.mapreduce.HCatOutputFormat;
+import org.apache.hive.hcatalog.mapreduce.OutputJobInfo;
+/**
+ * The HCatInputFormat is used with MapReduce jobs to read data from HCatalog-managed tables.
+ * The HCatOutputFormat is used with MapReduce jobs to write data to HCatalog-managed tables.
+ * 
+ * HCatMRGroupByAge – 利用HCatInputFormat、HCatOutputFormat接口，从hive表里读数据，按age字段分组
+ * 
+ * CREATE TABLE student (name STRING，age INT)
+ * ROW FORMAT DELIMITED
+ * FIELDS TERMINATED BY '\t'
+ * LINES TERMINATED BY '\n'
+ * STORED AS TEXTFILE;
+ *
+ * CREATE TABLE student_out (name STRING，count INT)
+ * ROW FORMAT DELIMITED
+ * FIELDS TERMINATED BY '\t'
+ * LINES TERMINATED BY '\n'
+ * STORED AS TEXTFILE;
+ * @author xiaodongfang
+ *
+ */
+public class HCatMRFromHive extends Configured implements Tool {
+
+	@SuppressWarnings("rawtypes")
+	public static class Map extends
+			Mapper<WritableComparable, HCatRecord, IntWritable, IntWritable> {
+
+		Integer birthday;
+		HCatSchema schema;
+
+		@Override
+		protected void map(WritableComparable key, HCatRecord value,
+				Context context) throws IOException, InterruptedException {
+			// Get our schema from the Job object.
+			schema = HCatInputFormat.getTableSchema(context.getConfiguration());
+			// Read the user field.
+			birthday = value.getInteger("birthday", schema);
+			context.write(new IntWritable(birthday), new IntWritable(1));
+		}
+	}
+
+	@SuppressWarnings("rawtypes")
+	public static class Reduce extends
+			Reducer<IntWritable, IntWritable, WritableComparable, HCatRecord> {
+		@Override
+		protected void reduce(IntWritable key, Iterable<IntWritable> values,
+				Context context) throws IOException, InterruptedException {
+			int sum = 0;
+			Iterator<IntWritable> iter = values.iterator();
+			while (iter.hasNext()) {
+				sum++;
+				iter.next().get();
+			}
+			HCatRecord record = new DefaultHCatRecord(2);
+			record.set(0, key.get());
+			record.set(1, sum);
+			context.write(null, record);
+		}
+	}
+
+	public int run(String[] args) throws Exception {
+
+		String inputTableName = null;
+		String outputTableName = null;
+		Configuration conf = getConf();
+	    args = new GenericOptionsParser(conf, args).getRemainingArgs();
+		try {
+			//获取配置文件参数
+			String confFile = args[0];
+			File configFile = new File(confFile);
+			System.out.println("configuration file is:" + confFile);
+			InputStream in = new FileInputStream(configFile);
+			Properties props = new Properties();
+			props.load(in);			
+			inputTableName = props.getProperty("inputTableName");
+			outputTableName = props.getProperty("outputTableName");
+			in.close();
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+
+		Job job = Job.getInstance(conf);		
+		job.setJobName("HCatMRWordCount");
+		// Read the inputTableName table, partition null, initialize the default
+		// database.
+		HCatInputFormat.setInput(job, null, inputTableName);
+
+		// Initialize HCatoutputFormat
+		job.setInputFormatClass(HCatInputFormat.class);
+		job.setJarByClass(HCatMRFromHive.class);
+		job.setMapperClass(Map.class);
+		job.setReducerClass(Reduce.class);
+
+		job.setMapOutputKeyClass(IntWritable.class);
+		job.setMapOutputValueClass(IntWritable.class);
+		job.setOutputKeyClass(WritableComparable.class);
+		job.setOutputValueClass(DefaultHCatRecord.class);
+
+		String inputJobString = job.getConfiguration().get(
+				HCatConstants.HCAT_KEY_JOB_INFO);
+		job.getConfiguration().set(HCatConstants.HCAT_KEY_JOB_INFO,
+				inputJobString);
+
+		// Write into outputTableName table, partition null, initialize the
+		// default database.
+		OutputJobInfo outputJobInfo = OutputJobInfo.create(null,
+				outputTableName, null);
+		job.getConfiguration().set(HCatConstants.HCAT_KEY_OUTPUT_INFO,
+				HCatUtil.serialize(outputJobInfo));
+		HCatOutputFormat.setOutput(job, outputJobInfo);
+
+		HCatSchema s = HCatOutputFormat.getTableSchema(job.getConfiguration());
+		HCatOutputFormat.setSchema(job, s);
+
+		System.out.println("INFO: Output scheme explicity set for writing:" + s);
+		job.setOutputFormatClass(HCatOutputFormat.class);
+		System.out.println("Output input table 'inputTableName'：" + inputTableName);
+		System.out.println("Output output table 'outputTableName'：" + outputTableName);
+		return (job.waitForCompletion(true) ? 0 : 1);
+	}
+
+	public static void main(String[] args) throws Exception {
+
+		int exitcode = ToolRunner.run(new HCatMRFromHive(), args);
+		System.exit(exitcode);
+	}
+}

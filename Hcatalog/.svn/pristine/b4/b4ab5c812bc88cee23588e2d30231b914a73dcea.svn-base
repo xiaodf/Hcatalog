@@ -1,0 +1,135 @@
+package iie.hadoop.hcatalog;
+
+import iie.operator.api.format.SerHCatInputFormat;
+import iie.operator.api.format.SerHCatOutputFormat;
+
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.Properties;
+
+import org.apache.hive.hcatalog.data.HCatRecord;
+import org.apache.hive.hcatalog.data.schema.HCatSchema;
+import org.apache.spark.SerializableWritable;
+import org.apache.spark.SparkConf;
+import org.apache.spark.api.java.JavaPairRDD;
+import org.apache.spark.api.java.JavaRDD;
+import org.apache.spark.api.java.JavaSparkContext;
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.io.WritableComparable;
+import org.apache.hadoop.io.NullWritable;
+import org.apache.hadoop.mapreduce.Job;
+import org.apache.hive.hcatalog.mapreduce.OutputJobInfo;
+import org.apache.spark.api.java.function.Function;
+import org.apache.spark.api.java.function.PairFunction;
+
+import scala.Tuple2;
+
+/**
+ * spark+hcatalog操作hive表，将表中数据复制到另一张相同结构的表中
+ * 
+ * CREATE TABLE student_2 (name STRING，age INT) ROW FORMAT DELIMITED FIELDS
+ * TERMINATED BY '\t' LINES TERMINATED BY '\n' STORED AS TEXTFILE;
+ *
+ * @author xiaodongfang
+ *
+ */
+public class HCatSparkTest {
+
+	public static void main(String[] args) throws IOException {
+		JavaSparkContext jsc = new JavaSparkContext(
+				new SparkConf().setAppName("HCatSparkTest"));
+		if (args.length < 1) {
+			System.err.println("Usage: HCatSparkTest <configuration>");
+			System.exit(1);
+		}
+		String dbName = null;
+		String inputTable = null;
+		String outputTable = null;
+		try {
+			// 获取配置文件参数
+			String confFile = args[0];
+			File configFile = new File(confFile);
+			InputStream in = new FileInputStream(configFile);
+			Properties props = new Properties();
+			props.load(in);
+			dbName = props.getProperty("dbName");
+			inputTable = props.getProperty("inputTable");
+			outputTable = props.getProperty("outputTable");
+			in.close();
+		} catch (IOException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+		JavaRDD<SerializableWritable<HCatRecord>> rdd1 = HCatSparkTest
+				.readFromTable(jsc, dbName, inputTable);
+		HCatSparkTest.store(rdd1, dbName, outputTable);
+		jsc.stop();
+		System.out.println("配置文件的位置为：" + args[0]);
+		System.exit(0);
+	}
+
+	@SuppressWarnings("rawtypes")
+	public static JavaRDD<SerializableWritable<HCatRecord>> readFromTable(
+			JavaSparkContext jsc, String dbName, String tblName)
+			throws IOException {
+
+		Configuration inputConf = new Configuration();
+		SerHCatInputFormat.setInput(inputConf, dbName, tblName);
+
+		JavaPairRDD<WritableComparable, SerializableWritable> rdd = jsc
+				.newAPIHadoopRDD(inputConf, SerHCatInputFormat.class,
+						WritableComparable.class, SerializableWritable.class);
+		// 获取表记录集
+		JavaRDD<SerializableWritable<HCatRecord>> result = null;
+		result = rdd
+				.map(new Function<Tuple2<WritableComparable, SerializableWritable>, SerializableWritable<HCatRecord>>() {
+
+					private static final long serialVersionUID = -2362812254158054659L;
+
+					@SuppressWarnings("unchecked")
+					public SerializableWritable<HCatRecord> call(
+							Tuple2<WritableComparable, SerializableWritable> v)
+							throws Exception {
+						return v._2; // 返回记录
+					}
+				});
+		return result;
+	}
+
+	@SuppressWarnings("rawtypes")
+	public static void store(JavaRDD<SerializableWritable<HCatRecord>> rdd,
+			String dbName, String tblName) {
+		Job outputJob = null;
+		try {
+			outputJob = Job.getInstance();
+			outputJob.setJobName("word count");
+			outputJob.setOutputFormatClass(SerHCatOutputFormat.class);
+			outputJob.setOutputKeyClass(WritableComparable.class);
+			outputJob.setOutputValueClass(SerializableWritable.class);
+			SerHCatOutputFormat.setOutput(outputJob,
+					OutputJobInfo.create(dbName, tblName, null));
+			HCatSchema schema = SerHCatOutputFormat.getTableSchema(outputJob
+					.getConfiguration());
+			SerHCatOutputFormat.setSchema(outputJob, schema);
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+
+		// 将RDD存储到目标表中
+		rdd.mapToPair(
+				new PairFunction<SerializableWritable<HCatRecord>, WritableComparable, SerializableWritable<HCatRecord>>() {
+
+					private static final long serialVersionUID = -4658431554556766962L;
+
+					@Override
+					public Tuple2<WritableComparable, SerializableWritable<HCatRecord>> call(
+							SerializableWritable<HCatRecord> record)
+							throws Exception {
+						return new Tuple2<WritableComparable, SerializableWritable<HCatRecord>>(
+								NullWritable.get(), record);
+					}
+				}).saveAsNewAPIHadoopDataset(outputJob.getConfiguration());
+	}
+}

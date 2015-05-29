@@ -1,0 +1,93 @@
+package iie.hadoop.hcatalog;
+
+import java.io.IOException;
+
+import org.apache.hive.hcatalog.data.HCatRecord;
+import org.apache.hive.hcatalog.mapreduce.HCatInputFormat;
+import org.apache.spark.SparkConf;
+import org.apache.spark.api.java.JavaRDD;
+import org.apache.spark.api.java.JavaSparkContext;
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.io.WritableComparable;
+import org.apache.hadoop.io.NullWritable;
+import org.apache.hive.hcatalog.mapreduce.HCatOutputFormat;
+import org.apache.hive.hcatalog.mapreduce.OutputJobInfo;
+import org.apache.spark.api.java.function.Function;
+import org.apache.spark.api.java.function.PairFunction;
+
+import scala.Tuple2;
+
+public class TableToTable {
+
+	public static void main(String[] args) throws IOException {
+		JavaSparkContext jsc = new JavaSparkContext(
+				new SparkConf().setAppName("HCatInputFormatTest"));
+
+		JavaRDD<HCatRecord> rdd1 = TableToTable.readFromTable(jsc, "wx", "ldp_t1");
+		//JavaRDD<HCatRecord> rdd2 = TableToTable.filter(rdd1);
+		TableToTable.saveToTable(rdd1, "wx", "ldp_t2");
+		jsc.stop();
+		System.exit(0); 
+	}
+	@SuppressWarnings("rawtypes")
+	public static JavaRDD<HCatRecord> readFromTable(JavaSparkContext jsc,
+			String dbName, String tblName) throws IOException {
+		Configuration inputConf = new Configuration();
+		/* need be set, if hive configuration file can not be visible */
+		//inputConf.set("hive.metastore.uris", "thrift://m105:9083");
+		HCatInputFormat.setInput(inputConf, dbName, tblName);
+
+		/* set columns which will be read */
+		// List<Integer> readColumns = Lists.newArrayList(0, 1);
+		// inputConf.setInt(RCFile.COLUMN_NUMBER_CONF_STR, readColumns.size());
+		// ColumnProjectionUtils.appendReadColumns(inputConf, readColumns);
+		return jsc
+				.newAPIHadoopRDD(inputConf, HCatInputFormat.class,
+						WritableComparable.class, HCatRecord.class)
+				.map(new Function<Tuple2<WritableComparable, HCatRecord>, HCatRecord>() {
+					private static final long serialVersionUID = 271668729623304968L;
+
+					@Override
+					public HCatRecord call(
+							Tuple2<WritableComparable, HCatRecord> v)
+							throws Exception {
+						return v._2;
+					}
+				});
+	}
+	@SuppressWarnings("rawtypes")
+	public static void saveToTable(JavaRDD<HCatRecord> rdd, String dbName,
+			String tblName) throws IOException {
+		Configuration outputConf = new Configuration();
+		//outputConf.set("hive.metastore.uris", "thrift://m105:9083");
+		HCatOutputFormat.setOutput(outputConf, null,
+				OutputJobInfo.create(dbName, tblName, null));
+		rdd.mapToPair(
+				new PairFunction<HCatRecord, WritableComparable, HCatRecord>() {
+					private static final long serialVersionUID = 3530199468954019029L;
+
+					@SuppressWarnings("unchecked")
+					@Override
+					public Tuple2<WritableComparable, HCatRecord> call(
+							HCatRecord record) throws Exception {
+						return new Tuple2(NullWritable.get(), record);
+					}
+				}).saveAsNewAPIHadoopDataset(outputConf);
+	
+	}
+
+//	public static JavaRDD<HCatRecord> filter(JavaRDD<HCatRecord> rdd) {
+//		return rdd.filter(new Function<HCatRecord, Boolean>() {
+//
+//			/**
+//			 * 
+//			 */
+//			private static final long serialVersionUID = 7195500411538098019L;
+//
+//			@Override
+//			public Boolean call(HCatRecord record) throws Exception {
+//				return record.get(1).toString().contains("v1");
+//			}
+//		});
+//	}
+}

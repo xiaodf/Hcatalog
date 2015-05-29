@@ -1,0 +1,7 @@
+#last update
+#Sun Nov 30 17:12:56 CST 2014
+READERDIR=/tmp/reader.txt
+DATABASE=wx
+TABLE=tbl_spark_in
+inputTableName=age
+outputTableName=age_out

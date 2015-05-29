@@ -1,0 +1,63 @@
+package iie.hadoop.hcatalog;
+
+import iie.operator.api.format.SerHCatInputFormat;
+import iie.operator.api.format.SerHCatOutputFormat;
+
+import java.io.IOException;
+
+import org.apache.hadoop.io.WritableComparable;
+import org.apache.hadoop.mapreduce.Job;
+import org.apache.hive.hcatalog.data.schema.HCatSchema;
+import org.apache.hive.hcatalog.mapreduce.OutputJobInfo;
+import org.apache.spark.SerializableWritable;
+import org.apache.spark.SparkConf;
+import org.apache.spark.api.java.JavaPairRDD;
+import org.apache.spark.api.java.JavaSparkContext;
+
+/**
+ * Spark与HCatalog结合示例。主要完成的操作是把数据从一张表导出，并导入另外一张表。
+ * 
+ * 注： 1. 应首先将每个节点的/etc/hive/conf/hive-site.xml链接到/etc/spark/conf/目录下
+ * 
+ * @author weixing
+ *
+ */
+public class ReadWriteTest {
+	@SuppressWarnings("rawtypes")
+	public static void main(String[] args) throws IOException {
+		
+		String dbName = "wx";
+		String inputTbl = "tbl_spark_in";
+		String outputTbl = "tbl_spark_out";
+
+		JavaSparkContext jsc = new JavaSparkContext(
+				new SparkConf().setAppName("ReadWriteTest")); // ReadWriteTest.class.getName()
+		// 设置HCatalog输入表信息
+		Job inputJob = Job.getInstance();
+		SerHCatInputFormat.setInput(inputJob.getConfiguration(), dbName,
+				inputTbl);
+
+		// 得到包含输入表所有数据的RDD
+		JavaPairRDD<WritableComparable, SerializableWritable> dataset = jsc
+				.newAPIHadoopRDD(inputJob.getConfiguration(),
+						SerHCatInputFormat.class, WritableComparable.class,
+						SerializableWritable.class);
+		
+		// 设置HCatalog输出表信息
+		Job outputJob = Job.getInstance();
+		outputJob.setOutputFormatClass(SerHCatOutputFormat.class);
+		outputJob.setOutputKeyClass(WritableComparable.class);
+		outputJob.setOutputValueClass(SerializableWritable.class);
+		SerHCatOutputFormat.setOutput(outputJob,
+				OutputJobInfo.create(dbName, outputTbl, null));
+		HCatSchema schema = SerHCatOutputFormat.getTableSchema(outputJob
+				.getConfiguration());
+		SerHCatOutputFormat.setSchema(outputJob, schema);
+
+		// 将数据写入到输出表中
+		dataset.saveAsNewAPIHadoopDataset(outputJob.getConfiguration());
+
+		jsc.stop();
+		System.exit(0); 
+	}
+}

@@ -1,0 +1,22 @@
+#last update
+#Sun Nov 30 17:12:56 CST 2014
+#CREATE TABLE age (name STRING, birthday INT)
+#   ROW FORMAT DELIMITED
+#   FIELDS TERMINATED BY '\t'
+#   LINES TERMINATED BY '\n'
+#   STORED AS TEXTFILE;
+#    
+#   CREATE TABLE age_out (birthday INT, birthday_count INT)
+#   ROW FORMAT DELIMITED
+#   FIELDS TERMINATED BY '\t'
+#   LINES TERMINATED BY '\n'
+#   STORED AS TEXTFILE;
+READERDIR=/tmp/reader.txt
+DATABASE=wx
+TABLE=tbl_spark_in
+inputTableName=age
+outputTableName=age_out
+inputFile=input
+outputFile=mr_out6
+inputSparkFile=/user/hdfs/*.txt
+outputSparkFile=/user/hdfs/output
